@@ -22,6 +22,7 @@
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "qom/object.h"
 #include "system/system.h"
 #include "system/memory.h"
 #include "target/riscv/cpu.h"
@@ -53,6 +54,10 @@ static void g233_soc_init(Object *obj)
      * You can add more devices here(e.g. cpu, gpio)
      * Attention: The cpu resetvec is 0x1004
      */
+     printf("g233 soc init\n");
+
+     G233SoCState *s = RISCV_G233_SOC(obj);
+     object_initialize_child(obj, "cpus", &s->cpus, TYPE_RISCV_HART_ARRAY);
 }
 
 static void g233_soc_realize(DeviceState *dev, Error **errp)
@@ -61,8 +66,14 @@ static void g233_soc_realize(DeviceState *dev, Error **errp)
     G233SoCState *s = RISCV_G233_SOC(dev);
     MemoryRegion *sys_mem = get_system_memory();
     const MemMapEntry *memmap = g233_memmap;
+    uint32_t num_harts = ms->smp.cpus;
 
     /* CPUs realize */
+    qdev_prop_set_uint32(DEVICE(&s->cpus), "num-harts", num_harts);
+    qdev_prop_set_uint32(DEVICE(&s->cpus), "hartid-base", 0);
+    qdev_prop_set_string(DEVICE(&s->cpus), "cpu-type",
+                         TYPE_RISCV_CPU_GEVICO_G233);
+    sysbus_realize(SYS_BUS_DEVICE(&s->cpus), &error_fatal);
 
     /* Mask ROM */
     memory_region_init_rom(&s->mask_rom, OBJECT(dev), "riscv.g233.mrom",
@@ -160,7 +171,9 @@ static void g233_machine_init(MachineState *machine)
     }
 
     /* Initialize SoC */
-
+    object_initialize_child(OBJECT(machine), "soc", &s->soc,
+                            TYPE_RISCV_G233_SOC);
+    qdev_realize(DEVICE(&s->soc), NULL, &error_fatal);
 
     /* Data Memory(DDR RAM) */
 
@@ -188,6 +201,7 @@ static void g233_machine_init(MachineState *machine)
 
 static void g233_machine_instance_init(Object *obj)
 {
+    printf("g233_machine_instance_init\n");
 }
 
 static void g233_machine_class_init(ObjectClass *oc, const void *data)
