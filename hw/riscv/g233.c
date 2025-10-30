@@ -54,10 +54,11 @@ static void g233_soc_init(Object *obj)
      * You can add more devices here(e.g. cpu, gpio)
      * Attention: The cpu resetvec is 0x1004
      */
-     printf("g233 soc init\n");
 
      G233SoCState *s = RISCV_G233_SOC(obj);
      object_initialize_child(obj, "cpus", &s->cpus, TYPE_RISCV_HART_ARRAY);
+
+     object_initialize_child(obj, "gpio", &s->gpio, TYPE_SIFIVE_GPIO);
 }
 
 static void g233_soc_realize(DeviceState *dev, Error **errp)
@@ -73,6 +74,8 @@ static void g233_soc_realize(DeviceState *dev, Error **errp)
     qdev_prop_set_uint32(DEVICE(&s->cpus), "hartid-base", 0);
     qdev_prop_set_string(DEVICE(&s->cpus), "cpu-type",
                          TYPE_RISCV_CPU_GEVICO_G233);
+    qdev_prop_set_uint64(DEVICE(&s->cpus), "resetvec",
+                         memmap[G233_DEV_MROM].base + 0x4);
     sysbus_realize(SYS_BUS_DEVICE(&s->cpus), &error_fatal);
 
     /* Mask ROM */
@@ -158,7 +161,7 @@ static void g233_machine_init(MachineState *machine)
 {
     MachineClass *mc = MACHINE_GET_CLASS(machine);
     const MemMapEntry *memmap = g233_memmap;
-
+    MemoryRegion *system_memory = get_system_memory();
     G233MachineState *s = RISCV_G233_MACHINE(machine);
     int i;
     RISCVBootInfo boot_info;
@@ -176,6 +179,9 @@ static void g233_machine_init(MachineState *machine)
     qdev_realize(DEVICE(&s->soc), NULL, &error_fatal);
 
     /* Data Memory(DDR RAM) */
+    memory_region_add_subregion(system_memory,
+                                memmap[G233_DEV_DRAM].base,
+                                machine->ram);
 
     /* Mask ROM reset vector */
     uint32_t reset_vec[5];
@@ -201,7 +207,6 @@ static void g233_machine_init(MachineState *machine)
 
 static void g233_machine_instance_init(Object *obj)
 {
-    printf("g233_machine_instance_init\n");
 }
 
 static void g233_machine_class_init(ObjectClass *oc, const void *data)
