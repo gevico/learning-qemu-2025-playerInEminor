@@ -267,6 +267,11 @@ void helper_cbo_inval(CPURISCVState *env, target_ulong address)
     /* We don't emulate the cache-hierarchy, so we're done. */
 }
 
+void helper_dma(CPURISCVState *env, target_ulong rd, target_ulong rs1, target_ulong rs2)
+{
+    env->gpr[rd] = 233;
+}
+
 #ifndef CONFIG_USER_ONLY
 
 target_ulong helper_sret(CPURISCVState *env)
