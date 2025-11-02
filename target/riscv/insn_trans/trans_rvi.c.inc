@@ -18,6 +18,7 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdbool.h>
 static bool trans_illegal(DisasContext *ctx, arg_empty *a)
 {
     gen_exception_illegal(ctx);
@@ -1224,6 +1225,71 @@ static bool trans_csrrci(DisasContext *ctx, arg_csrrci * a)
 
 static bool trans_dma(DisasContext *ctx, arg_dma *a)
 {
-    gen_helper_dma(tcg_env, tcg_constant_tl(a->rd), tcg_constant_tl(a->rs1), tcg_constant_tl(a->rs2));
+    TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
+    TCGv src = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv grain = get_gpr(ctx, a->rs2, EXT_NONE);
+    gen_helper_dma(tcg_env, dst, src, grain);
+    return true;
+}
+
+static bool trans_sort(DisasContext *ctx, arg_sort *a)
+{
+    TCGv n = get_gpr(ctx, a->rd, EXT_NONE);
+    TCGv array = get_gpr(ctx, a->rs1, EXT_NONE);
+    gen_helper_sort(tcg_env, n, array);
+    return true;
+}
+
+static bool trans_crush(DisasContext *ctx, arg_crush *a)
+{
+    TCGLabel * Lloop = gen_new_label();
+    TCGLabel * Lend = gen_new_label();
+    TCGv rd = get_gpr(ctx, a->rd, EXT_NONE);             // New array addr
+    TCGv rs1 = get_gpr(ctx, a->rs1, EXT_NONE);  // src array addr
+    TCGv rs2 = get_gpr(ctx, a->rs2, EXT_NONE);  // element count n
+
+    tcg_gen_brcondi_tl(TCG_COND_EQ, rs2, 0, Lend);   //     testq %rdx, %rdx; jz    .Lend   # if n == 0, return
+
+    TCGv new_len = tcg_temp_new();
+    tcg_gen_mov_tl(new_len, rs2);   //     movq  %rdx, %rcx
+    tcg_gen_sari_tl(new_len, new_len, 1);    //     shrq  $1, %rcx            # rcx = n / 2 (number of output bytes)
+
+    TCGv i = tcg_temp_new();
+    tcg_gen_movi_tl(i, 0);  //     xorq  %rax, %rax          # rax = loop counter i = 0
+
+    gen_set_label(Lloop);   //  .Lloop:
+
+    //     # Load two bytes: src[2*i] and src[2*i + 1]
+    TCGv low = tcg_temp_new();
+    tcg_gen_qemu_ld_tl(low, rs1, ctx->mem_idx, MO_UB); //     movb  (%rdi, %rax, 2), %dl      # dl = src[2*i]
+    tcg_gen_addi_tl(rs1, rs1, 1);
+
+    TCGv new = tcg_temp_new();
+    tcg_gen_qemu_ld_tl(new, rs1, ctx->mem_idx, MO_UB);  //     movb  1(%rdi, %rax, 2), %bl     # bl = src[2*i + 1]
+    tcg_gen_addi_tl(rs1, rs1, 1);
+
+
+    tcg_gen_andi_tl(low, low, 0x0F);    //     andb  $0x0F, %dl                # keep low 4 bits of first
+    tcg_gen_andi_tl(new, new, 0x0F);    //     andb  $0x0F, %bl                # keep low 4 bits of second
+
+    tcg_gen_shli_tl(new, new, 4);   //     shlb  $4, %bl                   # bl <<= 4
+    tcg_gen_or_tl(new, new, low);   //     orb   %bl, %dl                  # dl |= bl
+    tcg_gen_qemu_st_tl(new, rd, ctx->mem_idx, MO_UB);    //     movb  %dl, (%rsi, %rax)         # dst[i] = packed byte
+    tcg_gen_addi_tl(rd, rd, 1);
+
+    tcg_gen_addi_tl(i, i, 1);   //     incq  %rax                      # i++
+    tcg_gen_brcond_tl(TCG_COND_NE, i, new_len, Lloop);  //     cmpq  %rcx, %rax; jl    .Lloop
+
+    gen_set_label(Lend);
+
+    return true;
+}
+
+static bool trans_expand(DisasContext *ctx, arg_crush *a)
+{
+    TCGv dst = get_gpr(ctx, a->rd, EXT_NONE);
+    TCGv src = get_gpr(ctx, a->rs1, EXT_NONE);
+    TCGv num = get_gpr(ctx, a->rs2, EXT_NONE);
+    gen_helper_expand(tcg_env, dst, src, num);
     return true;
 }

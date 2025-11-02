@@ -1287,3 +1287,6 @@ DEF_HELPER_4(vsm4r_vv, void, ptr, ptr, env, i32)
 DEF_HELPER_4(vsm4r_vs, void, ptr, ptr, env, i32)
 
 DEF_HELPER_4(dma, void, env, tl, tl, tl)
+DEF_HELPER_3(sort, void, env, tl, tl)
+DEF_HELPER_2(print, void, env, tl)
+DEF_HELPER_4(expand, void, env, tl, tl, tl)

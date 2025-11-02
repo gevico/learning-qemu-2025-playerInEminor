@@ -27,6 +27,7 @@
 #include "exec/helper-proto.h"
 #include "exec/tlb-flags.h"
 #include "trace.h"
+#include <stdint.h>
 
 /* Exceptions processing helpers */
 G_NORETURN void riscv_raise_exception(CPURISCVState *env,
@@ -267,9 +268,81 @@ void helper_cbo_inval(CPURISCVState *env, target_ulong address)
     /* We don't emulate the cache-hierarchy, so we're done. */
 }
 
-void helper_dma(CPURISCVState *env, target_ulong rd, target_ulong rs1, target_ulong rs2)
+void helper_dma(CPURISCVState *env, uintptr_t dst,
+                uintptr_t src, target_ulong grain)
 {
-    env->gpr[rd] = 233;
+    int n;
+    int i, j;
+    uint32_t val;
+    uintptr_t src_p, dst_p;
+
+    if (grain > 2) {
+        riscv_raise_exception(env, RISCV_EXCP_ILLEGAL_INST, GETPC());
+    }
+
+    n = 1 << (grain + 3);
+    for (i = 0; i < n; ++i) {
+        for (j = 0; j < n; ++j) {
+            src_p = src + (i * n + j) * sizeof(uint32_t);
+            dst_p = dst + (j * n + i) * sizeof(uint32_t);
+            val =  cpu_ldl_data(env, src_p);
+            cpu_stl_data(env, dst_p, val);
+        }
+    }
+
+}
+
+void helper_sort(CPURISCVState *env, target_ulong n, uintptr_t array)
+{
+    int32_t arr_j = 0;
+    int32_t arr_j_1 = 0;
+    uintptr_t arr_j_p, arr_j_1_p;
+
+    for (int i = 0; i < n - 1; i++) {
+        int32_t swapped = 0;
+        for (int j = 0; j < n - i - 1; j++) {
+            arr_j_p = array + j * sizeof(int32_t);
+            arr_j_1_p = array + (j + 1) * sizeof(int32_t);
+            arr_j = (int32_t)cpu_ldl_data(env, arr_j_p);
+            arr_j_1 = (int32_t)cpu_ldl_data(env, arr_j_1_p);
+            if (arr_j > arr_j_1) {
+                cpu_stl_data(env, arr_j_1_p, arr_j);
+                cpu_stl_data(env, arr_j_p, arr_j_1);
+                swapped = 1;
+            }
+        }
+        if (!swapped) {
+            break;
+        }
+    }
+}
+
+void helper_print(CPURISCVState *env, target_ulong val)
+{
+    // uint8_t val = (uint8_t)val;
+    printf("%u\n", (uint8_t)val);
+}
+
+void helper_expand(CPURISCVState *env, uintptr_t dst, uintptr_t src, target_ulong num)
+{
+    uintptr_t dst_p = 0;
+    uintptr_t src_p = 0;
+    uint8_t val = 0;
+
+    size_t j = 0;
+    for (size_t i = 0; i < num; i++) {
+        src_p = src + i * sizeof(uint8_t);
+
+        dst_p = dst + j * sizeof(uint8_t);
+        j++;
+        val = (uint8_t)cpu_ldub_data(env, src_p);
+        cpu_stb_data(env, dst_p, val & 0x0F);
+
+        dst_p = dst + j * sizeof(uint8_t);
+        j++;
+        cpu_stb_data(env, dst_p, (val >> 4) & 0x0F);
+
+    }
 }
 
 #ifndef CONFIG_USER_ONLY
