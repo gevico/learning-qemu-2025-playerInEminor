@@ -33,6 +33,7 @@
 #include "hw/riscv/boot.h"
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
+#include "hw/ssi/g233_spi.h"
 #include "hw/misc/unimp.h"
 #include "hw/char/pl011.h"
 
@@ -45,6 +46,7 @@ static const MemMapEntry g233_memmap[] = {
     [G233_DEV_UART0] =    { 0x10000000,     0x1000 },
     [G233_DEV_GPIO0] =    { 0x10012000,     0x1000 },
     [G233_DEV_PWM0] =     { 0x10015000,     0x1000 },
+    [G233_DEV_SPI0] =     { 0x10018000,     0x1000 },
     [G233_DEV_DRAM] =     { 0x80000000, 0x40000000 },
 };
 
@@ -105,6 +107,15 @@ static void g233_soc_realize(DeviceState *dev, Error **errp)
                                RISCV_ACLINT_DEFAULT_MTIMECMP,
                                RISCV_ACLINT_DEFAULT_MTIME,
                                32768, false); /* TODO: set default freq */
+
+    /* SPI */
+    s->spi0 = qdev_new(TYPE_G233_SPI);
+    if (!sysbus_realize(SYS_BUS_DEVICE(s->spi0), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(s->spi0), 0, memmap[G233_DEV_SPI0].base);
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->spi0), 0,
+                       qdev_get_gpio_in(DEVICE(s->plic), G233_SPI_IRQ));
 
     /* GPIO */
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio), errp)) {
