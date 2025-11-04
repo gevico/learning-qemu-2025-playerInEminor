@@ -25,6 +25,7 @@
 #include "qom/object.h"
 #include "system/system.h"
 #include "system/memory.h"
+#include "system/block-backend-global-state.h"
 #include "target/riscv/cpu.h"
 #include "chardev/char.h"
 #include "hw/loader.h"
@@ -34,6 +35,7 @@
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
 #include "hw/ssi/g233_spi.h"
+#include "hw/ssi/ssi.h"
 #include "hw/misc/unimp.h"
 #include "hw/char/pl011.h"
 
@@ -176,6 +178,9 @@ static void g233_machine_init(MachineState *machine)
     G233MachineState *s = RISCV_G233_MACHINE(machine);
     int i;
     RISCVBootInfo boot_info;
+    BlockBackend *blk0, *blk1;
+    DeviceState *flash_dev1, *flash_dev2;
+    qemu_irq flash_cs1, flash_cs2;
 
     if (machine->ram_size < mc->default_ram_size) {
         char *sz = size_to_str(mc->default_ram_size);
@@ -193,6 +198,23 @@ static void g233_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory,
                                 memmap[G233_DEV_DRAM].base,
                                 machine->ram);
+
+    /* Flash*/
+    flash_dev1 = qdev_new("w25x16");
+    qdev_prop_set_uint8(flash_dev1, "cs", 0);
+    blk0 = blk_by_name("flash0");
+    qdev_prop_set_drive_err(flash_dev1, "drive", blk0, &error_fatal);
+    qdev_realize_and_unref(flash_dev1, BUS(G233_SPI(s->soc.spi0)->ssi), &error_fatal);
+    flash_cs1 = qdev_get_gpio_in_named(flash_dev1, SSI_GPIO_CS, 0);
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->soc.spi0), 1, flash_cs1);
+    /* Connect second flash to SPI */
+    flash_dev2 = qdev_new("w25x32");
+    qdev_prop_set_uint8(flash_dev2, "cs", 1);
+    blk1 = blk_by_name("flash1");
+    qdev_prop_set_drive_err(flash_dev2, "drive", blk1, &error_fatal);
+    qdev_realize_and_unref(flash_dev2, BUS(G233_SPI(s->soc.spi0)->ssi), &error_fatal);
+    flash_cs2 = qdev_get_gpio_in_named(flash_dev2, SSI_GPIO_CS, 0);
+    sysbus_connect_irq(SYS_BUS_DEVICE(s->soc.spi0), 2, flash_cs2);
 
     /* Mask ROM reset vector */
     uint32_t reset_vec[5];

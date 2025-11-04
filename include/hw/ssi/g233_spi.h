@@ -14,6 +14,7 @@ typedef struct G233SPIState {
 
     MemoryRegion mmio;
     qemu_irq irq;
+    SSIBus *ssi;
 
     uint32_t num_cs;
     uint32_t cr1;
