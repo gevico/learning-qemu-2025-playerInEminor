@@ -14,24 +14,20 @@
 #define SPI_DR      0x0C
 #define SPI_CSCTRL  0x10
 
+#define SPI_SR_BSY 0x80
+#define SPI_SR_RXNE 0x01
+#define SPI_SR_OVERRUN 0x08
+#define SPI_SR_UNDERRUN 0x04
+#define SPI_SR_TXE 0x02
+
+#define SPI_CR2_TXEIE        (1 << 7)   /* TXE interrupt enable */
+#define SPI_CR2_RXNEIE       (1 << 6)   /* RXNE interrupt enable */
+#define SPI_CR2_ERRIE        (1 << 5)   /* Error interrupt enable */
+
 #define CSi_EN(sr, i) \
     ( ( (sr) >> (i) ) & 1 )
 #define CSi_ACT(sr, i) \
     ( ( (sr) >> ( (i) + 4 ) ) & 1)
-
-static void g233_spi_reset(DeviceState *dev)
-{
-    G233SPIState *s = G233_SPI(dev);
-
-    s->cr1 = 0;
-    s->cr2 = 0;
-    s->sr = 0x00000002;
-    s->dr = 0x0000000c;
-    s->csctrl = 0;
-
-    // sifive_spi_txfifo_reset(s);
-    // sifive_spi_rxfifo_reset(s);
-}
 
 static void g233_spi_update_cs_lines(G233SPIState *s)
 {
@@ -49,6 +45,57 @@ static void g233_spi_update_cs_lines(G233SPIState *s)
     }
 }
 
+static void g233_spi_update_irq(G233SPIState *s)
+{
+    bool level = 0;
+    if((s->cr2 & SPI_CR2_TXEIE) && (s->sr & SPI_SR_TXE)){
+        level = 1;
+    }
+
+    if((s->cr2 & SPI_CR2_RXNEIE) && (s->sr & SPI_SR_RXNE)){
+        level = 1;
+    }
+
+    if((s->cr2 & SPI_CR2_ERRIE) && (s->sr & (SPI_SR_OVERRUN | SPI_SR_UNDERRUN))){
+        level = 1;
+    }
+
+    qemu_set_irq(s->irq, level);
+}
+
+static void g233_spi_reset(DeviceState *dev)
+{
+    G233SPIState *s = G233_SPI(dev);
+
+    s->cr1 = 0;
+    s->cr2 = 0;
+    s->sr = 0x00000002;
+    s->dr = 0x0000000c;
+    s->csctrl = 0;
+
+
+    g233_spi_update_cs_lines(s);
+    g233_spi_update_irq(s);
+    // sifive_spi_txfifo_reset(s);
+    // sifive_spi_rxfifo_reset(s);
+}
+
+static void g233_transfer_data(G233SPIState *s)
+{
+    uint32_t retval;
+    s->sr |= SPI_SR_BSY;
+
+    retval = ssi_transfer(s->ssi, s->dr);
+    if (s->sr & SPI_SR_RXNE) {
+        s->sr |= SPI_SR_OVERRUN;
+    } else {
+        s->dr = retval;
+    }
+    s->sr |= SPI_SR_TXE;
+    s->sr |= SPI_SR_RXNE;
+    s->sr &= ~SPI_SR_BSY;
+}
+
 static uint64_t g233_spi_read(void *opaque, hwaddr addr, unsigned int size)
 {
     G233SPIState *s = opaque;
@@ -64,6 +111,7 @@ static uint64_t g233_spi_read(void *opaque, hwaddr addr, unsigned int size)
         return s->sr;
         break;
     case SPI_DR:
+        s->sr &= ~SPI_SR_RXNE;
         return s->dr;
         break;
     case SPI_CSCTRL:
@@ -73,6 +121,7 @@ static uint64_t g233_spi_read(void *opaque, hwaddr addr, unsigned int size)
         qemu_log_mask(LOG_UNIMP, "%s: unimplemented register 0x%08" PRIx64 "\n",
                       __func__, addr);
     }
+    g233_spi_update_irq(s);
     return 0;
 }
 
@@ -88,23 +137,32 @@ static void g233_spi_write(void *opaque, hwaddr addr,
         break;
     case SPI_CR2:
         s->cr2 = value;
-        g233_spi_update_cs_lines(s);
         break;
     case SPI_SR:
-        s->sr = value;
+        if (value & SPI_SR_OVERRUN)
+            s->sr &= ~SPI_SR_OVERRUN;
+        if (value & SPI_SR_UNDERRUN)
+            s->sr &= ~SPI_SR_UNDERRUN;
         break;
     case SPI_DR:
-        s->dr = value;
+        if (!(s->sr & SPI_SR_TXE)) {
+            s->sr |= SPI_SR_OVERRUN;
+        } else {
+            s->dr = (uint32_t)value;
+            s->sr &= ~SPI_SR_TXE;
+            g233_transfer_data(s);
+        }
         break;
     case SPI_CSCTRL:
         s->csctrl = value;
+        g233_spi_update_cs_lines(s);
         break;
     default:
         qemu_log_mask(LOG_UNIMP, "%s: unimplemented register 0x%08" PRIx64 "\n",
                       __func__, addr);
         return;
     }
-    // g233_spi_update_irq(s);
+    g233_spi_update_irq(s);
 }
 
 static const MemoryRegionOps g233_spi_ops = {
